@@ -177,3 +177,50 @@ button#start-btn:active { transform: translateY(1px); }
 }
 
 .hidden { display: none !important; }
+
+/* ---------- 모바일 가상 조이스틱 ---------- */
+#joystick {
+  position: absolute;
+  left: 5%;
+  bottom: 5%;
+  width: 140px;
+  height: 140px;
+  pointer-events: none;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#joystick-base {
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(4px);
+}
+
+#joystick-knob {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  border: 3px solid rgba(255, 255, 255, 0.45);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 0 12px rgba(0,0,0,0.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* 모바일에서만 조이스틱 표시 */
+@media (pointer: coarse) {
+  #joystick {
+    display: flex !important;
+  }
+  #joystick.hidden {
+    display: none !important;
+  }
+}
