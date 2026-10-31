@@ -46,6 +46,9 @@ let joystickTouchId = null;
 let joystickVec = { x: 0, y: 0 }; // -1 ~ 1
 let activeTouches = new Map(); // identifier -> { clientX, clientY }
 
+/* ---------- mobile action buttons ---------- */
+let btnInteractEl, btnFlashlightEl;
+
 function getJoystickAreaRect() {
   const rect = canvas.getBoundingClientRect();
   // 왼쪽 아래 45% x 45% 영역을 조이스틱 전용으로 지정
@@ -61,6 +64,17 @@ function isInJoystickArea(clientX, clientY) {
   const area = getJoystickAreaRect();
   return clientX >= area.left && clientX <= area.right &&
          clientY >= area.top && clientY <= area.bottom;
+}
+
+function isInButtonArea(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const btnSize = Math.min(rect.width * 0.18, 120);
+  const margin = Math.min(rect.width * 0.05, 30);
+  // 오른쪽 아래 영역 (조이스틱과 대칭)
+  return clientX >= rect.left + rect.width - btnSize - margin &&
+         clientX <= rect.left + rect.width - margin &&
+         clientY >= rect.top + rect.height - btnSize * 2.5 - margin &&
+         clientY <= rect.top + rect.height - margin;
 }
 
 function updateJoystickVisual(clientX, clientY) {
@@ -144,6 +158,33 @@ function init() {
     const baseRect = joystickBaseEl.getBoundingClientRect();
     joystickCenter.x = baseRect.left + baseRect.width / 2;
     joystickCenter.y = baseRect.top + baseRect.height / 2;
+  }
+
+  // ---------- 모바일 조작 버튼 ----------
+  btnInteractEl = document.getElementById('btn-interact');
+  btnFlashlightEl = document.getElementById('btn-flashlight');
+  if (isMobile && btnInteractEl && btnFlashlightEl) {
+    const btnContainer = document.getElementById('mobile-buttons');
+    if (btnContainer) btnContainer.classList.remove('hidden');
+
+    const handleInteract = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      doInteract();
+    };
+    const handleFlashlight = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      flashlightOn = !flashlightOn;
+      flashlight.intensity = flashlightOn ? 3.2 : 0;
+      flashStateEl.textContent = flashlightOn ? 'ON' : 'OFF';
+      btnFlashlightEl.className = 'mobile-btn ' + (flashlightOn ? 'flashlight-on' : 'flashlight-off');
+    };
+
+    btnInteractEl.addEventListener('touchstart', handleInteract, { passive: false });
+    btnInteractEl.addEventListener('click', handleInteract);
+    btnFlashlightEl.addEventListener('touchstart', handleFlashlight, { passive: false });
+    btnFlashlightEl.addEventListener('click', handleFlashlight);
   }
 
   // ---------- 학생 NPC (테스트: 복도에 1명 배치) ----------
@@ -309,6 +350,8 @@ function onTouchStart(e) {
     if (joystickTouchId === null && isInJoystickArea(t.clientX, t.clientY)) {
       joystickTouchId = t.identifier;
       updateJoystickVisual(t.clientX, t.clientY);
+    } else if (isInButtonArea(t.clientX, t.clientY)) {
+      // 버튼 영역 터치는 카메라 입력에서 제외 (버튼 핸들러가 처리함)
     } else if (joystickTouchId !== t.identifier) {
       // 카메라용 터치 시작 위치 기록
       lastTouchX = t.clientX;
@@ -324,11 +367,11 @@ function onTouchMove(e) {
     activeTouches.set(t.identifier, { clientX: t.clientX, clientY: t.clientY });
     if (t.identifier === joystickTouchId) {
       updateJoystickVisual(t.clientX, t.clientY);
-    } else {
+    } else if (!isInButtonArea(t.clientX, t.clientY)) {
       cameraTouch = t;
     }
   }
-  // 카메라 회전 (조이스틱이 아닌 터치 중 하나)
+  // 카메라 회전 (조이스틱이나 버튼이 아닌 터치 중 하나)
   if (cameraTouch) {
     const prev = activeTouches.get(cameraTouch.identifier);
     if (prev) {
@@ -453,6 +496,18 @@ function animate() {
       camera.rotation.set(touchPitch, touchYaw, 0);
       camera.rotation.order = 'YXZ';
       camera.updateMatrixWorld();
+    }
+
+    // 손전등 위치와 방향을 카메라 기준으로 업데이트 (카메라 시선 방향을 따라감)
+    if (flashlight) {
+      flashlight.position.copy(camera.position);
+      flashlight.position.y = PLAYER_HEIGHT - 0.05;
+      const target = new THREE.Vector3();
+      camera.getWorldDirection(target);
+      target.multiplyScalar(30);
+      target.add(camera.position);
+      flashlight.target.position.copy(target);
+      flashlight.target.updateMatrixWorld();
     }
 
     // 학생 NPC 업데이트 (시선 반응 이동)
