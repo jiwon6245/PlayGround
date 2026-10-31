@@ -30,9 +30,23 @@ const interactables = []; // {mesh, text, dist}
 let msgTimer = 0;
 let prevTime = performance.now();
 
+/* ---------- mobile detection ---------- */
+let isMobile = false;
+let touchYaw = 0;
+let touchPitch = 0;
+let lastTouchX = 0;
+let lastTouchY = 0;
+const TOUCH_SENSITIVITY = 0.004;
+
 /* ---------- school walls (for NPC raycast occlusion) ---------- */
 let wallMeshes = [];
 let npcManager;
+
+function detectMobile() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+         ('ontouchstart' in window) ||
+         (navigator.maxTouchPoints > 0);
+}
 
 /* ---------- scene setup ---------- */
 function init() {
@@ -68,6 +82,9 @@ function init() {
 
   buildSchool();
 
+  // ---------- 모바일 감지 ----------
+  isMobile = detectMobile();
+
   // ---------- 학생 NPC (테스트: 복도에 1명 배치) ----------
   npcManager = new NPCManager();
   npcManager.setOccluders(wallMeshes);
@@ -82,22 +99,37 @@ function init() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
 
-  controls = new PointerLockControls(camera, document.body);
+  if (!isMobile) {
+    // 데스크톱: 기존 PointerLockControls 사용
+    controls = new PointerLockControls(camera, document.body);
 
-  startBtn.addEventListener('click', () => {
-    canvas.focus();
-    controls.lock();
-  });
-  controls.addEventListener('lock', () => {
-    isLocked = true;
-    startScreen.classList.add('hidden');
-    hud.classList.remove('hidden');
-  });
-  controls.addEventListener('unlock', () => {
-    isLocked = false;
-    startScreen.classList.remove('hidden');
-    hud.classList.add('hidden');
-  });
+    startBtn.addEventListener('click', () => {
+      canvas.focus();
+      controls.lock();
+    });
+    controls.addEventListener('lock', () => {
+      isLocked = true;
+      startScreen.classList.add('hidden');
+      hud.classList.remove('hidden');
+    });
+    controls.addEventListener('unlock', () => {
+      isLocked = false;
+      startScreen.classList.remove('hidden');
+      hud.classList.add('hidden');
+    });
+  } else {
+    // 모바일: 터치 드래그로 카메라 회전
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+    startBtn.addEventListener('click', () => {
+      canvas.focus();
+      isLocked = true;
+      startScreen.classList.add('hidden');
+      hud.classList.remove('hidden');
+    });
+  }
 
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
@@ -207,6 +239,33 @@ function onKeyUp(e) {
     case 'ShiftLeft': isSprinting = false; break;
   }
 }
+
+/* ---------- mobile touch camera ---------- */
+function onTouchStart(e) {
+  e.preventDefault();
+  lastTouchX = e.touches[0].clientX;
+  lastTouchY = e.touches[0].clientY;
+}
+
+function onTouchMove(e) {
+  e.preventDefault();
+  const dx = e.touches[0].clientX - lastTouchX;
+  const dy = e.touches[0].clientY - lastTouchY;
+
+  touchYaw -= dx * TOUCH_SENSITIVITY;
+  touchPitch -= dy * TOUCH_SENSITIVITY;
+
+  // 상하 과도 회전 방지 (약 +/- 85도)
+  const limit = Math.PI / 2 - 0.05;
+  touchPitch = Math.max(-limit, Math.min(limit, touchPitch));
+
+  lastTouchX = e.touches[0].clientX;
+  lastTouchY = e.touches[0].clientY;
+}
+
+function onTouchEnd(e) {
+  e.preventDefault();
+}
 function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -268,7 +327,10 @@ function animate() {
   const dt = Math.min(0.05, (now - prevTime) / 1000);
   prevTime = now;
 
-  if (controls.isLocked) {
+  const isPointerLocked = controls ? controls.isLocked : false;
+  const isActive = isPointerLocked || (isMobile && isLocked);
+
+  if (isActive) {
     const speed = isSprinting ? SPRINT : SPEED;
     const dir = new THREE.Vector3(move.left - move.right, 0, move.forward - move.backward);
     if (dir.lengthSq() > 0) {
@@ -285,6 +347,13 @@ function animate() {
     // keep inside school bounds
     camera.position.x = Math.max(-20, Math.min(20, camera.position.x));
     camera.position.z = Math.max(-26, Math.min(3, camera.position.z));
+
+    if (isMobile) {
+      // 모바일 터치 카메라 회전 적용
+      camera.rotation.set(touchPitch, touchYaw, 0);
+      camera.rotation.order = 'YXZ';
+      camera.updateMatrixWorld();
+    }
 
     // 학생 NPC 업데이트 (시선 반응 이동)
     npcManager.update(camera, dt);
