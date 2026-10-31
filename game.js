@@ -22,7 +22,7 @@ let suspicion = 0; // 0..100
 let isLocked = false;
 
 const PLAYER_HEIGHT = 1.6;
-const PLAYER_RADIUS = 0.45;
+const PLAYER_RADIUS = 0.3;
 const SPEED = 5.5;
 const SPRINT = 9.5;
 
@@ -413,8 +413,8 @@ function onTouchStart(e) {
       updateJoystickVisual(t.clientX, t.clientY);
     } else if (isInButtonArea(t.clientX, t.clientY)) {
       // 버튼 영역 터치는 카메라 입력에서 제외 (버튼 핸들러가 처리함)
-    } else if (joystickTouchId !== t.identifier) {
-      // 카메라용 터치 시작 위치 기록
+    } else {
+      // 조이스틱/버튼이 아닌 모든 터치는 카메라 회전용으로 기록
       lastTouchX = t.clientX;
       lastTouchY = t.clientY;
     }
@@ -435,7 +435,7 @@ function onTouchMove(e) {
       updateJoystickVisual(t.clientX, t.clientY);
     } else if (!isInButtonArea(t.clientX, t.clientY)) {
       cameraTouch = t;
-      cameraPrev = prev; // 카메라 터치의 이전 위치 보존
+      cameraPrev = prev || { clientX: t.clientX, clientY: t.clientY }; // 방어 코드
     }
   }
 
