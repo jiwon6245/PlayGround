@@ -21,6 +21,12 @@ let flashlightOn = true;
 let suspicion = 0; // 0..100
 let isLocked = false;
 
+/* ---------- 성능 최적화: 매 프레임 재사용 벡터 ---------- */
+let _up;
+let _fwdMob, _rightMob, _worldMob;
+let _fwdDesk, _rightDesk, _dirDesk, _offsetDesk;
+let _flashTarget;
+
 const PLAYER_HEIGHT = 1.6;
 const PLAYER_RADIUS = 0.3;
 const SPEED = 5.5;
@@ -121,6 +127,7 @@ function init() {
 
   camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 120);
   camera.position.set(0, PLAYER_HEIGHT, 1.5);
+  camera.rotation.order = 'YXZ';
 
   const ambient = new THREE.AmbientLight(0x404050, 0.3);
   scene.add(ambient);
@@ -239,6 +246,17 @@ function init() {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('resize', onResize);
+
+  // ---------- 성능 최적화: 재사용 벡터 초기화 ----------
+  _up = new THREE.Vector3(0, 1, 0);
+  _fwdMob = new THREE.Vector3();
+  _rightMob = new THREE.Vector3();
+  _worldMob = new THREE.Vector3();
+  _fwdDesk = new THREE.Vector3();
+  _rightDesk = new THREE.Vector3();
+  _dirDesk = new THREE.Vector3();
+  _offsetDesk = new THREE.Vector3();
+  _flashTarget = new THREE.Vector3();
 
   setInterval(() => flickerLights(ceilingLights), 450);
   updateSuspicion();
@@ -563,22 +581,22 @@ function animate() {
       const ny = -joystickVec.y / joyLen;          // 화면 위쪽 = 양수 (카메라 전방, 화면 좌표계 반전)
 
       // 카메라 기준 수평 전방 벡터 (y=0 고정)
-      const forward = new THREE.Vector3();
-      camera.getWorldDirection(forward);
-      forward.y = 0;
-      forward.normalize();
+      _fwdMob.set(0, 0, 0);
+      camera.getWorldDirection(_fwdMob);
+      _fwdMob.y = 0;
+      _fwdMob.normalize();
 
       // 카메라 기준 우측 벡터
-      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
+      _rightMob.crossVectors(_fwdMob, _up);
 
       // 월드 이동 방향 = 카메라 전방 * ny + 카메라 우측 * nx
-      const worldMove = new THREE.Vector3();
-      worldMove.addScaledVector(forward, ny);
-      worldMove.addScaledVector(right, nx);
-      worldMove.normalize();
+      _worldMob.set(0, 0, 0);
+      _worldMob.addScaledVector(_fwdMob, ny);
+      _worldMob.addScaledVector(_rightMob, nx);
+      _worldMob.normalize();
 
-      moveDX = worldMove.x * speed * dt;
-      moveDZ = worldMove.z * speed * dt;
+      moveDX = _worldMob.x * speed * dt;
+      moveDZ = _worldMob.z * speed * dt;
 
       // WASD 입력 잔여값 초기화 (모바일에서는 사용하지 않음)
       move.forward = 0;
@@ -587,17 +605,19 @@ function animate() {
       move.right = 0;
     } else {
       // ---------- 데스크톱: WASD 이동 ----------
-      const dir = new THREE.Vector3(move.left - move.right, 0, move.forward - move.backward);
-      if (dir.lengthSq() > 0) {
-        dir.normalize();
-        const forward = new THREE.Vector3();
-        camera.getWorldDirection(forward);
-        forward.y = 0;
-        forward.normalize();
-        const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
-        const offset = forward.clone().multiplyScalar(-dir.z).add(right.clone().multiplyScalar(dir.x));
-        moveDX = offset.x * speed * dt;
-        moveDZ = offset.z * speed * dt;
+      _dirDesk.set(move.left - move.right, 0, move.forward - move.backward);
+      if (_dirDesk.lengthSq() > 0) {
+        _dirDesk.normalize();
+        _fwdDesk.set(0, 0, 0);
+        camera.getWorldDirection(_fwdDesk);
+        _fwdDesk.y = 0;
+        _fwdDesk.normalize();
+
+        _rightDesk.crossVectors(_fwdDesk, _up);
+
+        _offsetDesk.copy(_fwdDesk).multiplyScalar(-_dirDesk.z).add(_rightDesk.clone().multiplyScalar(_dirDesk.x));
+        moveDX = _offsetDesk.x * speed * dt;
+        moveDZ = _offsetDesk.z * speed * dt;
       }
     }
 
@@ -609,7 +629,6 @@ function animate() {
     if (isMobile) {
       // 모바일 터치 카메라 회전 적용
       camera.rotation.set(touchPitch, touchYaw, 0);
-      camera.rotation.order = 'YXZ';
       camera.updateMatrixWorld();
     }
 
@@ -617,11 +636,11 @@ function animate() {
     if (flashlight) {
       flashlight.position.copy(camera.position);
       flashlight.position.y = PLAYER_HEIGHT - 0.05;
-      const target = new THREE.Vector3();
-      camera.getWorldDirection(target);
-      target.multiplyScalar(30);
-      target.add(camera.position);
-      flashlight.target.position.copy(target);
+      _flashTarget.set(0, 0, 0);
+      camera.getWorldDirection(_flashTarget);
+      _flashTarget.multiplyScalar(30);
+      _flashTarget.add(camera.position);
+      flashlight.target.position.copy(_flashTarget);
       flashlight.target.updateMatrixWorld();
     }
 
