@@ -363,32 +363,31 @@ function onTouchStart(e) {
 function onTouchMove(e) {
   e.preventDefault();
   let cameraTouch = null;
+  let cameraPrev = null;
+
   for (const t of e.changedTouches) {
+    // 새 위치로 덮어쓰기 전에 이전 위치를 먼저 가져온다
+    const prev = activeTouches.get(t.identifier);
     activeTouches.set(t.identifier, { clientX: t.clientX, clientY: t.clientY });
+
     if (t.identifier === joystickTouchId) {
       updateJoystickVisual(t.clientX, t.clientY);
     } else if (!isInButtonArea(t.clientX, t.clientY)) {
       cameraTouch = t;
+      cameraPrev = prev; // 카메라 터치의 이전 위치 보존
     }
   }
+
   // 카메라 회전 (조이스틱이나 버튼이 아닌 터치 중 하나)
-  if (cameraTouch) {
-    const prev = activeTouches.get(cameraTouch.identifier);
-    if (prev) {
-      const dx = cameraTouch.clientX - prev.clientX;
-      const dy = cameraTouch.clientY - prev.clientY;
-      touchYaw -= dx * TOUCH_SENSITIVITY;
-      touchPitch -= dy * TOUCH_SENSITIVITY;
+  if (cameraTouch && cameraPrev) {
+    const dx = cameraTouch.clientX - cameraPrev.clientX;
+    const dy = cameraTouch.clientY - cameraPrev.clientY;
+    touchYaw -= dx * TOUCH_SENSITIVITY;
+    touchPitch -= dy * TOUCH_SENSITIVITY;
 
-      // 상하 과도 회전 방지 (약 +/- 85도)
-      const limit = Math.PI / 2 - 0.05;
-      touchPitch = Math.max(-limit, Math.min(limit, touchPitch));
-
-      activeTouches.set(cameraTouch.identifier, {
-        clientX: cameraTouch.clientX,
-        clientY: cameraTouch.clientY,
-      });
-    }
+    // 상하 과도 회전 방지 (약 +/- 85도)
+    const limit = Math.PI / 2 - 0.05;
+    touchPitch = Math.max(-limit, Math.min(limit, touchPitch));
   }
 }
 
