@@ -408,7 +408,9 @@ function onTouchStart(e) {
   e.preventDefault();
   for (const t of e.changedTouches) {
     activeTouches.set(t.identifier, { clientX: t.clientX, clientY: t.clientY });
-    if (joystickTouchId === null && isInJoystickArea(t.clientX, t.clientY)) {
+    if (isInJoystickArea(t.clientX, t.clientY)) {
+      // 조이스틱 영역에 들어오는 모든 터치가 조이스틱 입력으로 claim (선점)
+      // 이전 터치가 비정상 종료된 경우에도 새 터치가 조이스틱을 이어받음
       joystickTouchId = t.identifier;
       updateJoystickVisual(t.clientX, t.clientY);
     } else if (isInButtonArea(t.clientX, t.clientY)) {
@@ -459,6 +461,11 @@ function onTouchEnd(e) {
     if (t.identifier === joystickTouchId) {
       resetJoystick();
     }
+  }
+  // 안전 장치: 조이스틱 터치가 비정상 종료되어 changedTouches에 포함되지 않은 경우
+  // activeTouches에서 해당 식별자가 사라지면 조이스틱 입력을 강제로 0으로 초기화
+  if (joystickTouchId !== null && !activeTouches.has(joystickTouchId)) {
+    resetJoystick();
   }
 }
 function onResize() {
