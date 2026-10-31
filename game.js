@@ -22,6 +22,7 @@ let suspicion = 0; // 0..100
 let isLocked = false;
 
 const PLAYER_HEIGHT = 1.6;
+const PLAYER_RADIUS = 0.45;
 const SPEED = 5.5;
 const SPRINT = 9.5;
 
@@ -97,7 +98,8 @@ function resetJoystick() {
   joystickTouchId = null;
   joystickVec = { x: 0, y: 0 };
   if (joystickKnobEl) {
-    joystickKnobEl.style.transform = `translate(0, 0) translate(-50%, -50%)`;
+    // CSS의 top/left 50%와 함께 translate(-50%, -50%)로 정확히 중앙 배치
+    joystickKnobEl.style.transform = `translate(-50%, -50%)`;
   }
 }
 
@@ -224,6 +226,7 @@ function init() {
     canvas.addEventListener('touchstart', onTouchStart, { passive: false });
     canvas.addEventListener('touchmove', onTouchMove, { passive: false });
     canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
     startBtn.addEventListener('click', () => {
       canvas.focus();
@@ -274,7 +277,9 @@ function buildSchool() {
     door.rotation.y = Math.PI / 2;
     door.castShadow = true;
     door.receiveShadow = true;
+    door.userData = { isDoor: true, open: false };
     scene.add(door);
+    wallMeshes.push(door);
     interactables.push({ mesh: door, text: '교실 문', dist: 3.2 });
   }
 
@@ -310,6 +315,62 @@ function buildSchool() {
   scene.add(banner);
 
   interactables.push({ mesh: rack, text: '신발장', dist: 2.6 });
+}
+
+/* ---------- 충돌 판정 ---------- */
+// 특정 좌표에 플레이어 충돌 박스가 벽과 겹치는지 검사
+function checkWallCollisionAt(x, z) {
+  const r = PLAYER_RADIUS;
+  const playerMin = new THREE.Vector3(x - r, 0, z - r);
+  const playerMax = new THREE.Vector3(x + r, PLAYER_HEIGHT, z + r);
+  const playerBox = new THREE.Box3(playerMin, playerMax);
+
+  for (const wall of wallMeshes) {
+    // 열린 문은 충돌에서 제외
+    if (wall.userData && wall.userData.isDoor && wall.userData.open) {
+      continue;
+    }
+    const wallBox = new THREE.Box3().setFromObject(wall);
+    if (wallBox.intersectsBox(playerBox)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// X, Z 축을 개별적으로 시도해 벽을 따라 미끄러지도록 이동
+function tryMove(dx, dz) {
+  let nextX = camera.position.x;
+  let nextZ = camera.position.z;
+  let moved = false;
+
+  // X 축 이동 시도
+  if (Math.abs(dx) > 0.001) {
+    const testX = camera.position.x + dx;
+    if (!checkWallCollisionAt(testX, camera.position.z)) {
+      nextX = testX;
+      moved = true;
+    }
+  }
+
+  // Z 축 이동 시도 (이미 X가 적용된 기준)
+  if (Math.abs(dz) > 0.001) {
+    const testZ = camera.position.z + dz;
+    if (!checkWallCollisionAt(nextX, testZ)) {
+      nextZ = testZ;
+      moved = true;
+    }
+  }
+
+  if (moved) {
+    camera.position.x = nextX;
+    camera.position.z = nextZ;
+    camera.position.y = PLAYER_HEIGHT;
+    // 학교 외부 경계 제한 (내부 벽은 checkWallCollisionAt에서 처리)
+    camera.position.x = Math.max(-20, Math.min(20, camera.position.x));
+    camera.position.z = Math.max(-26, Math.min(3, camera.position.z));
+  }
+  return moved;
 }
 
 /* ---------- input ---------- */
@@ -404,6 +465,12 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  // 창 크기 변경 시 조이스틱 중심점 재계산 (위치 어긋남 방지)
+  if (isMobile && joystickBaseEl) {
+    const baseRect = joystickBaseEl.getBoundingClientRect();
+    joystickCenter.x = baseRect.left + baseRect.width / 2;
+    joystickCenter.y = baseRect.top + baseRect.height / 2;
+  }
 }
 
 /* ---------- interaction ---------- */
@@ -422,8 +489,20 @@ function doInteract() {
     if (ang > 0.95) continue;
     if (fwd < bestD) { bestD = fwd; best = it; }
   }
-  if (best) showMessage(best.text + ' — ' + (best.mesh.userData.open ? '열림' : '잠김'));
-  else showMessage('상호작용할 대상이 없습니다.');
+  if (best) {
+    const mesh = best.mesh;
+    // 문 열기/닫기 토글
+    if (mesh.userData && mesh.userData.isDoor) {
+      mesh.userData.open = !mesh.userData.open;
+      // 문 시각: 열린 상태면 벽면과 평행하게 회전 (열림), 닫힌 상태면 수직 (닫힘)
+      mesh.rotation.y = mesh.userData.open ? 0 : Math.PI / 2;
+      showMessage(best.text + ' — ' + (mesh.userData.open ? '열림' : '닫힘'));
+    } else {
+      showMessage(best.text + ' — ' + (mesh.userData.open ? '열림' : '잠김'));
+    }
+  } else {
+    showMessage('상호작용할 대상이 없습니다.');
+  }
 }
 
 function showMessage(t) {
@@ -466,6 +545,8 @@ function animate() {
 
   if (isActive) {
     const speed = isSprinting ? SPRINT : SPEED;
+    let moveDX = 0;
+    let moveDZ = 0;
 
     if (isMobile && (Math.abs(joystickVec.x) > 0.15 || Math.abs(joystickVec.y) > 0.15)) {
       // ---------- 모바일: 가상 조이스틱 이동 ----------
@@ -489,10 +570,8 @@ function animate() {
       worldMove.addScaledVector(right, nx);
       worldMove.normalize();
 
-      const nextPos = camera.position.clone().addScaledVector(worldMove, speed * dt);
-      camera.position.x = Math.max(-20, Math.min(20, nextPos.x));
-      camera.position.z = Math.max(-26, Math.min(3, nextPos.z));
-      camera.position.y = PLAYER_HEIGHT;
+      moveDX = worldMove.x * speed * dt;
+      moveDZ = worldMove.z * speed * dt;
 
       // WASD 입력 잔여값 초기화 (모바일에서는 사용하지 않음)
       move.forward = 0;
@@ -500,7 +579,7 @@ function animate() {
       move.left = 0;
       move.right = 0;
     } else {
-      // ---------- 데스크톱: WASD 이동 (기존 로직 유지) ----------
+      // ---------- 데스크톱: WASD 이동 ----------
       const dir = new THREE.Vector3(move.left - move.right, 0, move.forward - move.backward);
       if (dir.lengthSq() > 0) {
         dir.normalize();
@@ -510,11 +589,14 @@ function animate() {
         forward.normalize();
         const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
         const offset = forward.clone().multiplyScalar(-dir.z).add(right.clone().multiplyScalar(dir.x));
-        camera.position.add(offset.multiplyScalar(speed * dt));
+        moveDX = offset.x * speed * dt;
+        moveDZ = offset.z * speed * dt;
       }
-      camera.position.y = PLAYER_HEIGHT;
-      camera.position.x = Math.max(-20, Math.min(20, camera.position.x));
-      camera.position.z = Math.max(-26, Math.min(3, camera.position.z));
+    }
+
+    // 충돌 판정을 거친 이동 적용 (모바일/데스크톱 공통)
+    if (Math.abs(moveDX) > 0.001 || Math.abs(moveDZ) > 0.001) {
+      tryMove(moveDX, moveDZ);
     }
 
     if (isMobile) {
