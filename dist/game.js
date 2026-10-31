@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { NPCManager, StudentNPC } from './modules/npcs.js';
 
 /* ---------- DOM ---------- */
 const canvas = document.getElementById('canvas');
@@ -28,6 +29,10 @@ const interactables = []; // {mesh, text, dist}
 
 let msgTimer = 0;
 let prevTime = performance.now();
+
+/* ---------- school walls (for NPC raycast occlusion) ---------- */
+let wallMeshes = [];
+let npcManager;
 
 /* ---------- scene setup ---------- */
 function init() {
@@ -62,6 +67,15 @@ function init() {
   scene.add(flashlight.target);
 
   buildSchool();
+
+  // ---------- 학생 NPC (테스트: 복도에 1명 배치) ----------
+  npcManager = new NPCManager();
+  npcManager.setOccluders(wallMeshes);
+
+  const testNPC = new StudentNPC({ moveSpeed: 7.0, stopDistance: 1.5, sightAngle: 1.0 });
+  testNPC.setPosition(-8, 0, -8); // 복도 왼쪽 부근
+  scene.add(testNPC.mesh);
+  npcManager.add(testNPC);
 
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -109,6 +123,7 @@ function buildSchool() {
     m.rotation.y = ry;
     m.receiveShadow = true;
     scene.add(m);
+    wallMeshes.push(m);
     return m;
   }
   wall(0, 1.7, -22, 0);          // back
@@ -270,6 +285,9 @@ function animate() {
     // keep inside school bounds
     camera.position.x = Math.max(-20, Math.min(20, camera.position.x));
     camera.position.z = Math.max(-26, Math.min(3, camera.position.z));
+
+    // 학생 NPC 업데이트 (시선 반응 이동)
+    npcManager.update(camera, dt);
   }
 
   if (msgTimer > 0) { msgTimer--; if (msgTimer === 0) msgEl.classList.add('hidden'); }
