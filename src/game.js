@@ -38,6 +38,55 @@ let lastTouchX = 0;
 let lastTouchY = 0;
 const TOUCH_SENSITIVITY = 0.004;
 
+/* ---------- virtual joystick (mobile only) ---------- */
+let joystickBaseEl, joystickKnobEl;
+let joystickCenter = { x: 0, y: 0 };
+let joystickMaxDist = 50;
+let joystickTouchId = null;
+let joystickVec = { x: 0, y: 0 }; // -1 ~ 1
+let activeTouches = new Map(); // identifier -> { clientX, clientY }
+
+function getJoystickAreaRect() {
+  const rect = canvas.getBoundingClientRect();
+  // 왼쪽 아래 45% x 45% 영역을 조이스틱 전용으로 지정
+  return {
+    left: rect.left,
+    top: rect.top + rect.height * 0.55,
+    right: rect.left + rect.width * 0.45,
+    bottom: rect.top + rect.height,
+  };
+}
+
+function isInJoystickArea(clientX, clientY) {
+  const area = getJoystickAreaRect();
+  return clientX >= area.left && clientX <= area.right &&
+         clientY >= area.top && clientY <= area.bottom;
+}
+
+function updateJoystickVisual(clientX, clientY) {
+  if (!joystickBaseEl || !joystickKnobEl) return;
+  const dx = clientX - joystickCenter.x;
+  const dy = clientY - joystickCenter.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const clampedDist = Math.min(dist, joystickMaxDist);
+  const angle = Math.atan2(dy, dx);
+  const knobX = joystickCenter.x + Math.cos(angle) * clampedDist;
+  const knobY = joystickCenter.y + Math.sin(angle) * clampedDist;
+  joystickKnobEl.style.transform = `translate(${knobX - joystickCenter.x}px, ${knobY - joystickCenter.y}px) translate(-50%, -50%)`;
+
+  // 정규화된 벡터 (-1 ~ 1)
+  joystickVec.x = (clampedDist / joystickMaxDist) * Math.cos(angle);
+  joystickVec.y = (clampedDist / joystickMaxDist) * Math.sin(angle);
+}
+
+function resetJoystick() {
+  joystickTouchId = null;
+  joystickVec = { x: 0, y: 0 };
+  if (joystickKnobEl) {
+    joystickKnobEl.style.transform = `translate(0, 0) translate(-50%, -50%)`;
+  }
+}
+
 /* ---------- school walls (for NPC raycast occlusion) ---------- */
 let wallMeshes = [];
 let npcManager;
@@ -84,6 +133,18 @@ function init() {
 
   // ---------- 모바일 감지 ----------
   isMobile = detectMobile();
+
+  // ---------- 가상 조이스틱 (모바일만) ----------
+  joystickBaseEl = document.getElementById('joystick-base');
+  joystickKnobEl = document.getElementById('joystick-knob');
+  if (isMobile) {
+    const joystickEl = document.getElementById('joystick');
+    if (joystickEl) joystickEl.classList.remove('hidden');
+    // 조이스틱 베이스 중심점 (화면 기준)
+    const baseRect = joystickBaseEl.getBoundingClientRect();
+    joystickCenter.x = baseRect.left + baseRect.width / 2;
+    joystickCenter.y = baseRect.top + baseRect.height / 2;
+  }
 
   // ---------- 학생 NPC (테스트: 복도에 1명 배치) ----------
   npcManager = new NPCManager();
@@ -240,31 +301,62 @@ function onKeyUp(e) {
   }
 }
 
-/* ---------- mobile touch camera ---------- */
+/* ---------- mobile touch camera & joystick ---------- */
 function onTouchStart(e) {
   e.preventDefault();
-  lastTouchX = e.touches[0].clientX;
-  lastTouchY = e.touches[0].clientY;
+  for (const t of e.changedTouches) {
+    activeTouches.set(t.identifier, { clientX: t.clientX, clientY: t.clientY });
+    if (joystickTouchId === null && isInJoystickArea(t.clientX, t.clientY)) {
+      joystickTouchId = t.identifier;
+      updateJoystickVisual(t.clientX, t.clientY);
+    } else if (joystickTouchId !== t.identifier) {
+      // 카메라용 터치 시작 위치 기록
+      lastTouchX = t.clientX;
+      lastTouchY = t.clientY;
+    }
+  }
 }
 
 function onTouchMove(e) {
   e.preventDefault();
-  const dx = e.touches[0].clientX - lastTouchX;
-  const dy = e.touches[0].clientY - lastTouchY;
+  let cameraTouch = null;
+  for (const t of e.changedTouches) {
+    activeTouches.set(t.identifier, { clientX: t.clientX, clientY: t.clientY });
+    if (t.identifier === joystickTouchId) {
+      updateJoystickVisual(t.clientX, t.clientY);
+    } else {
+      cameraTouch = t;
+    }
+  }
+  // 카메라 회전 (조이스틱이 아닌 터치 중 하나)
+  if (cameraTouch) {
+    const prev = activeTouches.get(cameraTouch.identifier);
+    if (prev) {
+      const dx = cameraTouch.clientX - prev.clientX;
+      const dy = cameraTouch.clientY - prev.clientY;
+      touchYaw -= dx * TOUCH_SENSITIVITY;
+      touchPitch -= dy * TOUCH_SENSITIVITY;
 
-  touchYaw -= dx * TOUCH_SENSITIVITY;
-  touchPitch -= dy * TOUCH_SENSITIVITY;
+      // 상하 과도 회전 방지 (약 +/- 85도)
+      const limit = Math.PI / 2 - 0.05;
+      touchPitch = Math.max(-limit, Math.min(limit, touchPitch));
 
-  // 상하 과도 회전 방지 (약 +/- 85도)
-  const limit = Math.PI / 2 - 0.05;
-  touchPitch = Math.max(-limit, Math.min(limit, touchPitch));
-
-  lastTouchX = e.touches[0].clientX;
-  lastTouchY = e.touches[0].clientY;
+      activeTouches.set(cameraTouch.identifier, {
+        clientX: cameraTouch.clientX,
+        clientY: cameraTouch.clientY,
+      });
+    }
+  }
 }
 
 function onTouchEnd(e) {
   e.preventDefault();
+  for (const t of e.changedTouches) {
+    activeTouches.delete(t.identifier);
+    if (t.identifier === joystickTouchId) {
+      resetJoystick();
+    }
+  }
 }
 function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -331,6 +423,14 @@ function animate() {
   const isActive = isPointerLocked || (isMobile && isLocked);
 
   if (isActive) {
+    // 모바일 가상 조이스틱 입력 -> move 객체 반영
+    if (isMobile) {
+      move.forward = joystickVec.y < -0.15 ? 1 : 0;
+      move.backward = joystickVec.y > 0.15 ? 1 : 0;
+      move.left = joystickVec.x < -0.15 ? 1 : 0;
+      move.right = joystickVec.x > 0.15 ? 1 : 0;
+    }
+
     const speed = isSprinting ? SPRINT : SPEED;
     const dir = new THREE.Vector3(move.left - move.right, 0, move.forward - move.backward);
     if (dir.lengthSq() > 0) {
