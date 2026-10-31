@@ -1,0 +1,10 @@
+{
+  "name": "kogong-high-horror-prototype",
+  "version": "0.1.0",
+  "description": "1인칭 3D 공포 탐사 프로토타입 - 한국 공업고등학교, 졸업식 전날 밤",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "start": "node server.js"
+  }
+}
