@@ -465,30 +465,57 @@ function animate() {
   const isActive = isPointerLocked || (isMobile && isLocked);
 
   if (isActive) {
-    // 모바일 가상 조이스틱 입력 -> move 객체 반영
-    if (isMobile) {
-      move.forward = joystickVec.y < -0.15 ? 1 : 0;
-      move.backward = joystickVec.y > 0.15 ? 1 : 0;
-      move.left = joystickVec.x < -0.15 ? 1 : 0;
-      move.right = joystickVec.x > 0.15 ? 1 : 0;
-    }
-
     const speed = isSprinting ? SPRINT : SPEED;
-    const dir = new THREE.Vector3(move.left - move.right, 0, move.forward - move.backward);
-    if (dir.lengthSq() > 0) {
-      dir.normalize();
-      // move relative to camera facing
+
+    if (isMobile && (Math.abs(joystickVec.x) > 0.15 || Math.abs(joystickVec.y) > 0.15)) {
+      // ---------- 모바일: 가상 조이스틱 이동 ----------
+      // 조이스틱 입력 정규화 (대각선 속도 보정)
+      const joyLen = Math.sqrt(joystickVec.x * joystickVec.x + joystickVec.y * joystickVec.y);
+      const nx = joystickVec.x / joyLen;           // 화면 오른쪽 = 양수 (카메라 우측)
+      const ny = -joystickVec.y / joyLen;          // 화면 위쪽 = 양수 (카메라 전방, 화면 좌표계 반전)
+
+      // 카메라 기준 수평 전방 벡터 (y=0 고정)
       const forward = new THREE.Vector3();
       camera.getWorldDirection(forward);
-      forward.y = 0; forward.normalize();
+      forward.y = 0;
+      forward.normalize();
+
+      // 카메라 기준 우측 벡터
       const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
-      const offset = forward.clone().multiplyScalar(-dir.z).add(right.clone().multiplyScalar(dir.x));
-      camera.position.add(offset.multiplyScalar(speed * dt));
+
+      // 월드 이동 방향 = 카메라 전방 * ny + 카메라 우측 * nx
+      const worldMove = new THREE.Vector3();
+      worldMove.addScaledVector(forward, ny);
+      worldMove.addScaledVector(right, nx);
+      worldMove.normalize();
+
+      const nextPos = camera.position.clone().addScaledVector(worldMove, speed * dt);
+      camera.position.x = Math.max(-20, Math.min(20, nextPos.x));
+      camera.position.z = Math.max(-26, Math.min(3, nextPos.z));
+      camera.position.y = PLAYER_HEIGHT;
+
+      // WASD 입력 잔여값 초기화 (모바일에서는 사용하지 않음)
+      move.forward = 0;
+      move.backward = 0;
+      move.left = 0;
+      move.right = 0;
+    } else {
+      // ---------- 데스크톱: WASD 이동 (기존 로직 유지) ----------
+      const dir = new THREE.Vector3(move.left - move.right, 0, move.forward - move.backward);
+      if (dir.lengthSq() > 0) {
+        dir.normalize();
+        const forward = new THREE.Vector3();
+        camera.getWorldDirection(forward);
+        forward.y = 0;
+        forward.normalize();
+        const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
+        const offset = forward.clone().multiplyScalar(-dir.z).add(right.clone().multiplyScalar(dir.x));
+        camera.position.add(offset.multiplyScalar(speed * dt));
+      }
+      camera.position.y = PLAYER_HEIGHT;
+      camera.position.x = Math.max(-20, Math.min(20, camera.position.x));
+      camera.position.z = Math.max(-26, Math.min(3, camera.position.z));
     }
-    camera.position.y = PLAYER_HEIGHT;
-    // keep inside school bounds
-    camera.position.x = Math.max(-20, Math.min(20, camera.position.x));
-    camera.position.z = Math.max(-26, Math.min(3, camera.position.z));
 
     if (isMobile) {
       // 모바일 터치 카메라 회전 적용
